@@ -26,6 +26,12 @@ const contentSchema = new mongoose.Schema(
                 ref: "Tag",
             },
         ],
+
+        user: {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: "User",
+            required: true,
+        },
     },
     {
         timestamps: true,

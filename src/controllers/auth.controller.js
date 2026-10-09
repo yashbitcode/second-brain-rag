@@ -29,6 +29,7 @@ export const signup = async (req, res) => {
             },
         });
     } catch (error) {
+        console.log(error)
         return res.status(500).json({
             message: "Something went wrong",
         });
@@ -74,6 +75,8 @@ export const login = async (req, res) => {
             accessToken,
         });
     } catch (error) {
+        
+        console.log(error)
         return res.status(500).json({
             message: "Something went wrong",
         });
