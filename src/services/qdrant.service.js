@@ -33,12 +33,80 @@ class QdrantService {
         }
     }
 
+    async sample() {
+        // const re = await this.client.createPayloadIndex(this.collectionName, {
+        //     field_name: "title",
+        //     field_schema: {
+        //         type: "keyword",
+        //         prefix: true
+        //     },
+        //     wait: true
+        // })
+        // console.log(re)
+
+        // return await this.client.delete(this.collectionName, {
+        //     filter: {
+        //         must: [
+        //             {
+        //                 key: "contentId",
+        //                 match: {
+        //                     value: "6ac856162c5972f7dc9c30b2",
+        //                 },
+        //             },
+        //         ],
+        //     },
+        //     wait: true
+        // });
+
+        // return this.client.deletePayloadIndex(this.collectionName, "title_lower")
+        // return await this.client.query(this.collectionName, {
+        //     // query: {
+        //     //     text: "Docker",
+        //     //     model: this.embeddingModel,
+        //     // },
+        //     with_payload: true,
+        //     filter: {
+        //         must: [
+        //             {
+        //                 key: "userId",
+        //                 match: { value: "6ac3de041ede7d6c17c0f446" },
+        //             },
+        //         ],
+        //     },
+        //     limit: 5,
+        // });
+    }
+
+    async deleteContent(contentId, userId) {
+        if(!contentId || !userId) return;
+
+        return await this.client.delete(this.collectionName, {
+            filter: {
+                must: [
+                    {
+                        key: "contentId",
+                        match: {
+                            value: contentId,
+                        },
+                    },
+                    {
+                        key: "userId",
+                        match: {
+                            value: userId,
+                        },
+                    },
+                ],
+            },
+            wait: true
+        });
+    }
+
     async queryContent(query) {
-        if(!query) return [];
+        if (!query) return [];
 
         const queryResult = await this.client.query(this.collectionName, {
             query: {
-                text:  query,
+                text: query,
                 model: this.embeddingModel,
             },
             limit: 5,
@@ -46,10 +114,16 @@ class QdrantService {
             // with_vector: true
         });
 
-        console.dir(queryResult, {depth: null})
+        console.dir(queryResult, { depth: null });
 
-        return queryResult.points.map((res) => ({score: res.score, content: res.payload?.content, vector: res.vector}))
+        return queryResult.points.map((res) => ({
+            score: res.score,
+            content: res.payload?.content,
+            vector: res.vector,
+        }));
     }
+
+
 
     async upsertContentVectorPoints(contents) {
         const points = contents.map((content) => ({

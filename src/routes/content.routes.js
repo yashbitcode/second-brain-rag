@@ -17,7 +17,7 @@ router.use(authMiddleware);
 
 router.post("/", createContent);
 
-router.post("/sample-seed", sampleSeed);
+router.post("/sample", sampleSeed);
 
 router.post("/query", queryContent);
 

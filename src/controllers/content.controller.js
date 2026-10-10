@@ -5,6 +5,7 @@ import qdrantService from "../services/qdrant.service.js";
 import tagService from "../services/tag.service.js";
 import { Content } from "../models/content.model.js";
 import groqService from "../services/groq.service.js";
+import mongoose from "mongoose";
 
 export const createContent = async (req, res) => {
     try {
@@ -76,22 +77,38 @@ export const getContents = async (req, res) => {
 };
 
 export const updateContent = async (req, res) => {
+    const session = await mongoose.startSession();
+
     try {
         const { id } = req.params;
         const { title, documentType, content, tags } = req.body;
 
-        const updatedContent = await contentService.updateContent(
-            id,
-            req.user._id,
-            {
-                title,
-                documentType,
-                content,
-                tags,
-            },
-        );
+        const result = await session.withTransaction(async () => {
+            const updatedContent = await contentService.updateContent(
+                id,
+                req.user._id,
+                {
+                    title,
+                    documentType,
+                    content,
+                    tags,
+                },
+                session,
+            );
 
-        if (!updatedContent) {
+            if (!updatedContent) return null;
+            
+
+            console.log(updatedContent)
+
+            const a = await qdrantService.deleteContent(id, req.user._id);
+            console.log(a)
+            const b = await qdrantService.upsertContentVectorPoints([updatedContent]);
+            console.log(b)
+            return updatedContent;
+        });
+
+        if (!result) {
             return res.status(404).json({
                 message: "Content not found",
             });
@@ -99,12 +116,16 @@ export const updateContent = async (req, res) => {
 
         return res.status(200).json({
             message: "Content updated successfully",
-            content: updatedContent,
+            content: result,
         });
     } catch (error) {
+        console.error(error);
+
         return res.status(500).json({
             message: "Something went wrong",
         });
+    } finally {
+        await session.endSession();
     }
 };
 
@@ -112,12 +133,22 @@ export const deleteContent = async (req, res) => {
     try {
         const { id } = req.params;
 
-        const deletedContent = await contentService.deleteContent(
-            id,
-            req.user._id,
-        );
+        const session = await mongoose.startSession();
 
-        if (!deletedContent) {
+        const result = await session.withTransaction(async () => {
+            const deletedContent = await contentService.deleteContent(
+                id,
+                req.user._id,
+            );
+
+            if (!deletedContent) return;
+
+            await qdrantService.deleteContent(id, req.user._id);
+
+            return deletedContent;
+        });
+
+        if (!result) {
             return res.status(404).json({
                 message: "Content not found",
             });
@@ -127,21 +158,24 @@ export const deleteContent = async (req, res) => {
             message: "Content deleted successfully",
         });
     } catch (error) {
+        console.log(error);
         return res.status(500).json({
             message: "Something went wrong",
         });
+    } finally {
+        await session.endSession();
     }
 };
 
 export const queryContent = async (req, res) => {
     try {
-        const {query} = req.body;
+        const { query } = req.body;
 
         const result = await qdrantService.queryContent(query);
 
         const aiResult = await groqService.generateResponse(query, result);
 
-        console.log(aiResult.choices[0]?.message?.content || "")
+        // console.log(aiResult.choices[0]?.message?.content || "");
         return res.status(200).json({
             aiResult: aiResult.choices[0]?.message?.content || "",
             result,
@@ -172,12 +206,15 @@ export const sampleSeed = async (req, res) => {
         //     message: "Tags added successfully",
         // });
 
-        const response = await groqService.generateResponse(
-            "Explain the importance of low latency LLMs",
-        );
+        // const response = await groqService.generateResponse(
+        //     "Explain the importance of low latency LLMs",
+        // );
 
-        res.json(response);
+        const resp = await qdrantService.sample();
+
+        res.json(resp);
     } catch (error) {
+        console.log(error);
         return res.status(500).json({
             message: "Something went wrong",
         });

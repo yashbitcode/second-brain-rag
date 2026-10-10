@@ -65,7 +65,7 @@ class ContentService {
         ]);
     }
 
-    async updateContent(id, userId, updateData) {
+    async updateContent(id, userId, updateData, session = null) {
         return await Content.findOneAndUpdate(
             {
                 _id: id,
@@ -73,17 +73,17 @@ class ContentService {
             },
             updateData,
             {
-                new: true,
+                returnDocument: "after",
                 runValidators: true,
             },
-        );
+        ).session(session);
     }
 
-    async deleteContent(id, userId) {
+    async deleteContent(id, userId, session = null) {
         return await Content.findOneAndDelete({
             _id: id,
             user: userId,
-        });
+        }).session(session);
     }
 }
 
