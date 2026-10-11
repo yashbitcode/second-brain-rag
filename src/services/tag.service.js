@@ -6,18 +6,18 @@ class TagService {
         return await Tag.create(tagData);
     }
 
-    async doAllTagsExist(tags) {
+    async getSpecificTags(tags) {
         if(tags.length === 0) return 0;
 
         const tagSet = new Set(tags);
 
-        const tagCount = await Tag.countDocuments({
+        const tagsDoc = await Tag.find({
             _id: {
                 $in: [...tagSet],
             },
         });
 
-        return tagCount === tagSet.size;
+        return tagsDoc;
     }
 
     async getTags() {

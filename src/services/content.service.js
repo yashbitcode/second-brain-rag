@@ -1,8 +1,8 @@
 import { Content } from "../models/content.model.js";
 
 class ContentService {
-    async createContent(contentData) {
-        return await Content.create(contentData);
+    async createContent(contentData, session = null) {
+        return await Content.create(contentData, {session});
     }
 
     async findContentById(id, userId) {
@@ -66,7 +66,7 @@ class ContentService {
     }
 
     async updateContent(id, userId, updateData, session = null) {
-        return await Content.findOneAndUpdate(
+        const up = await Content.findOneAndUpdate(
             {
                 _id: id,
                 user: userId,
@@ -75,8 +75,14 @@ class ContentService {
             {
                 returnDocument: "after",
                 runValidators: true,
+                session,
+                populate: {path: "tags"}
             },
-        ).session(session);
+        )
+
+        console.log("up: ", up)
+
+        return up
     }
 
     async deleteContent(id, userId, session = null) {

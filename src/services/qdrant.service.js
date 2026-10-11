@@ -1,4 +1,3 @@
-import { v4 as uuidv4 } from "uuid";
 import { QdrantClient } from "@qdrant/js-client-rest";
 
 class QdrantService {
@@ -125,27 +124,10 @@ class QdrantService {
 
 
 
-    async upsertContentVectorPoints(contents) {
-        const points = contents.map((content) => ({
-            id: uuidv4(),
-
-            vector: {
-                text: content.content,
-                model: this.embeddingModel,
-            },
-
-            payload: {
-                contentId: content._id.toString(),
-                title: content.title,
-                content: content.content,
-                documentType: content.documentType,
-                userId: content.user.toString(),
-                updatedAt: content.updatedAt,
-            },
-        }));
-
+    async upsertContentVectorPoints(points) {
         return await this.client.upsert(this.collectionName, {
             points,
+            wait: true
         });
     }
 }
