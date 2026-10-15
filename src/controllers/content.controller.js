@@ -1,16 +1,25 @@
-import { RecursiveCharacterTextSplitter } from "@langchain/textsplitters";
 import contentService from "../services/content.service.js";
 import qdrantService from "../services/qdrant.service.js";
 import tagService from "../services/tag.service.js";
 import groqService from "../services/groq.service.js";
 import mongoose from "mongoose";
 import { chunkContent } from "../utils/helpers.js";
+import cloudinaryService from "../services/cloudinary.service.js";
 
 export const createContent = async (req, res) => {
     const session = await mongoose.startSession();
+    const file = req.file;
+
+    let imgRes = null;
 
     try {
-        const { title, documentType, content, tags = [] } = req.body;
+        const {
+            title,
+            documentType,
+            content,
+            tags = [],
+            imageShortNote,
+        } = req.body;
 
         let allTags = [];
 
@@ -26,22 +35,46 @@ export const createContent = async (req, res) => {
 
         const { baseContent, qdrantRes } = await session.withTransaction(
             async () => {
-                const [baseContent] = await contentService.createContent(
-                    [
+                const payload = {
+                    title,
+                    documentType,
+                    tags,
+                    user: req.user._id,
+                };
+
+                if (file) {
+                    const result = await cloudinaryService.uploadImage(
+                        file,
+                        allTags,
                         {
-                            title,
-                            documentType,
-                            content,
-                            tags,
-                            user: req.user._id,
+                            userId: req.user._id,
                         },
-                    ],
+                    );
+
+                    imgRes = payload.image = result;
+                    
+                    const aiImageRes = await groqService.getImageAnalysis(imgRes.imageUrl, imageShortNote)
+
+                    payload.image = imgRes;
+                    payload.imageShortNote = imageShortNote || "";
+                    payload.imageDescription = aiImageRes.briefDescription || "";
+                    payload.imageExtractText = aiImageRes.extractedText || "";
+                } else if (content) payload.content = content;
+
+                const [baseContent] = await contentService.createContent(
+                    [payload],
                     session,
                 );
 
-                baseContent.tags = allTags;
+                const chunkPoints = await chunkContent({
+                    contentId: baseContent._id,
+                    title: baseContent.title,
+                    user: baseContent.user,
+                    tags: allTags,
+                    content: baseContent.documentType === "text" ? baseContent.content : (baseContent.imageShortNote + " " + baseContent.imageDescription + " " + baseContent.imageExtractText)
+                });
 
-                const chunkPoints = await chunkContent(baseContent);
+                console.log(chunkPoints)
 
                 const qdrantRes =
                     await qdrantService.upsertContentVectorPoints(chunkPoints);
@@ -103,31 +136,34 @@ export const updateContent = async (req, res) => {
         const { id } = req.params;
         const { title, documentType, content, tags } = req.body;
 
-        const {updatedContent, qdrantRes} = await session.withTransaction(async () => {
-            const updatedContent = await contentService.updateContent(
-                id,
-                req.user._id,
-                {
-                    title,
-                    documentType,
-                    content,
-                    tags,
-                },
-                session,
-            );
-            
-            if (!updatedContent) return null;
+        const { updatedContent, qdrantRes } = await session.withTransaction(
+            async () => {
+                const updatedContent = await contentService.updateContent(
+                    id,
+                    req.user._id,
+                    {
+                        title,
+                        documentType,
+                        content,
+                        tags,
+                    },
+                    session,
+                );
 
-            console.log(updatedContent);
+                if (!updatedContent) return null;
 
-            const chunkPoints = await chunkContent(updatedContent);
+                console.log(updatedContent);
 
-            await qdrantService.deleteContent(id, req.user._id);
+                const chunkPoints = await chunkContent(updatedContent);
 
-            const qdrantRes = await qdrantService.upsertContentVectorPoints(chunkPoints);
+                await qdrantService.deleteContent(id, req.user._id);
 
-            return {updatedContent, qdrantRes};
-        });
+                const qdrantRes =
+                    await qdrantService.upsertContentVectorPoints(chunkPoints);
+
+                return { updatedContent, qdrantRes };
+            },
+        );
 
         if (!updatedContent) {
             return res.status(404).json({
@@ -138,7 +174,7 @@ export const updateContent = async (req, res) => {
         return res.status(200).json({
             message: "Content updated successfully",
             content: updatedContent,
-            qdrantRes
+            qdrantRes,
         });
     } catch (error) {
         console.error(error);
@@ -193,13 +229,12 @@ export const queryContent = async (req, res) => {
     try {
         const { query } = req.body;
 
-        const result = await qdrantService.queryContent(query);
+        const result = await qdrantService.queryContent(query, req.user._id);
 
         const aiResult = await groqService.generateResponse(query, result);
 
-        // console.log(aiResult.choices[0]?.message?.content || "");
         return res.status(200).json({
-            aiResult: aiResult.choices[0]?.message?.content || "",
+            aiResult: aiResult?.choices[0]?.message?.content || "I don't have the required context to answer this question",
             result,
         });
     } catch (error) {
@@ -212,51 +247,17 @@ export const queryContent = async (req, res) => {
 
 export const sampleSeed = async (req, res) => {
     try {
-        // const allTags = await Tag.insertMany(tags, { ordered: false });
-        // const allContents = await Content.insertMany(
-        //     moreContentData,
-        //     {
-        //         ordered: false
-        //     }
-        // )
+        // console.log(req.file);
 
-        // const qdrantRes = await qdrantService.upsertContentVectorPoints(allContents)
-
-        // res.status(200).json({
-        //     qdrantRes,
-        //     allContents,
-        //     message: "Tags added successfully",
-        // });
-
-        // const response = await groqService.generateResponse(
-        //     "Explain the importance of low latency LLMs",
-        // );
-
-        // const resp = await qdrantService.sample();
-        // console.log(req.body.text)
-        const parentDoc = {
-            content: `Wikipedia[e] is a free online encyclopedia written and maintained by a community of volunteer editors, known as Wikipedians, through open collaboration and the wiki software MediaWiki. Founded by Jimmy Wales and Larry Sanger in 2001, Wikipedia has been hosted since 2003 by the Wikimedia Foundation, an American nonprofit organization funded mainly by donations from readers.[1] Wikipedia is the largest and most read reference work in history. Initially available only in English, Wikipedia has grown to over 300 languages and is one of the world's most visited websites as of 2026. The English Wikipedia, with over 7 million articles, remains the largest of the editions, which together comprise more than 68 million articles and attract more than 1.5 billion unique device visits and 13 million edits per month (about five edits per second on average) as of April 2024.[4] As of December 2025, over 25% of Wikipedia's traffic comes from the United States, while Japan accounts for nearly 7%, and the United Kingdom, Germany, and Russia each represent around 5%.[5]`,
-
-            _id: "6ac52508961417142339f45d",
-            title: "sample-updated",
-            documentType: "text",
-            user: "6ac3de041ede7d6c17c0f446",
-            tags: [
-                {
-                    name: "Sample-tag",
-                },
-                {
-                    name: "Sample-tag",
-                },
-                {
-                    name: "Sample-tag",
-                },
-            ],
-        };
-
-        const resp = await chunkContent(parentDoc);
-
-        res.json(resp);
+        res.json({
+            message: "Image received",
+            file: {
+                originalname: req.file.originalname,
+                mimetype: req.file.detectedMimeType,
+                ext: req.file.detectedExtension,
+                size: req.file.size,
+            },
+        });
     } catch (error) {
         console.log(error);
         return res.status(500).json({

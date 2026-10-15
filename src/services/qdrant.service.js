@@ -100,22 +100,31 @@ class QdrantService {
         });
     }
 
-    async queryContent(query) {
+    async queryContent(query, userId = "") {
         if (!query) return [];
 
         const queryResult = await this.client.query(this.collectionName, {
+            filter: {
+                must: [
+                    {
+                        key: "userId",
+                        match: {
+                            value: userId
+                        }
+                    }
+                ]
+            },
             query: {
                 text: query,
                 model: this.embeddingModel,
             },
             limit: 5,
             with_payload: ["content"],
-            // with_vector: true
         });
 
         console.dir(queryResult, { depth: null });
 
-        return queryResult.points.map((res) => ({
+        return queryResult?.points?.map((res) => ({
             score: res.score,
             content: res.payload?.content,
             vector: res.vector,

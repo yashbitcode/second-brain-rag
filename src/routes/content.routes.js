@@ -10,14 +10,16 @@ import {
 } from "../controllers/content.controller.js";
 
 import { authMiddleware } from "../middlewares/auth.middleware.js";
+import upload from "../middlewares/multer-image.middleware.js";
+import validateImage from "../middlewares/image-validation.middleware.js";
 
 const router = express.Router();
 
 router.use(authMiddleware);
 
-router.post("/", createContent);
+router.post("/", upload.single("image"), validateImage,createContent);
 
-router.post("/sample", sampleSeed);
+router.post("/sample", upload.single("image"), validateImage, sampleSeed);
 
 router.post("/query", queryContent);
 

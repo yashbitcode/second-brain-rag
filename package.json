@@ -17,13 +17,16 @@
     "@langchain/textsplitters": "^1.0.2",
     "@qdrant/js-client-rest": "^1.19.0",
     "bcrypt": "^6.0.0",
+    "cloudinary": "^2.11.0",
     "cookie-parser": "^1.4.7",
     "dotenv": "^18.0.5",
     "express": "^5.2.1",
+    "file-type": "^22.2.0",
     "groq-sdk": "^1.6.0",
     "jsonwebtoken": "^9.0.3",
     "mongoose": "^9.10.4",
     "morgan": "^1.12.1",
+    "multer": "^2.4.0",
     "uuid": "^14.0.2"
   },
   "devDependencies": {
