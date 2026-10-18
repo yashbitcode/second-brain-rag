@@ -66,6 +66,8 @@ const contentSchema = new mongoose.Schema(
             // },
             validate: {
                 validator: function (value) {
+                    console.log("this:", this.documentType)
+                    console.log("VAL:", value)
                     return this.documentType === "image" || value == null;
                 },
                 message: "imageDescription is only allowed for image documents",

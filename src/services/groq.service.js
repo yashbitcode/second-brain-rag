@@ -8,10 +8,10 @@ class GroqService {
     }
 
     async getImageAnalysis(imageUrl, brief) {
-        // console.log({
-        //     imageUrl,
-        //     brief
-        // })
+        console.log({
+            imageUrl,
+            brief
+        })
         
         const chatCompletion = await this.client.chat.completions.create({
             model: process.env.GROQ_VISION_MODEL,

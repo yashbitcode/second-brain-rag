@@ -15,9 +15,13 @@ class CloudinaryService {
             },
         );
 
-        console.log(result);
-
         return { publicId: result.public_id, imageUrl: result.secure_url };
+    }
+
+    async deleteImage(publicId) {
+        return await cloudinary.uploader.destroy(publicId, {
+            invalidate: true,
+        }) 
     }
 }
 

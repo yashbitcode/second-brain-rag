@@ -5,12 +5,13 @@ import groqService from "../services/groq.service.js";
 import mongoose from "mongoose";
 import { chunkContent } from "../utils/helpers.js";
 import cloudinaryService from "../services/cloudinary.service.js";
+import bullMQEntryService from "../services/bullMQEntry.service.js";
+import { contentQueue } from "../queues/content.queue.js";
 
 export const createContent = async (req, res) => {
-    const session = await mongoose.startSession();
-    const file = req.file;
 
-    let imgRes = null;
+    const session = await mongoose.startSession();
+    let uploadedImage = null;
 
     try {
         const {
@@ -21,72 +22,110 @@ export const createContent = async (req, res) => {
             imageShortNote,
         } = req.body;
 
+        const file = req.file;
+
+        const parsedTags = typeof tags === "string" ? JSON.parse(tags) : tags;
+
         let allTags = [];
 
-        if (tags.length > 0) {
-            allTags = await tagService.getSpecificTags(tags);
+        if (documentType === "image" && !file) {
+            return res.status(400).json({
+                message: "Image file is required",
+            });
+        }
 
-            if (allTags.length !== tags.length) {
+        if (documentType === "text" && !content) {
+            return res.status(400).json({
+                message: "Content is required",
+            });
+        }
+
+        if (parsedTags.length > 0) {
+            allTags = await tagService.getSpecificTags(parsedTags);
+
+            if (allTags.length !== new Set(parsedTags).size) {
                 return res.status(400).json({
                     message: "One or more tags do not exist",
                 });
             }
         }
 
-        const { baseContent, qdrantRes } = await session.withTransaction(
-            async () => {
-                const payload = {
-                    title,
-                    documentType,
-                    tags,
-                    user: req.user._id,
-                };
+        if (documentType === "image") {
+            uploadedImage = await cloudinaryService.uploadImage(file, allTags, {
+                userId: req.user._id,
+            });
+        }
 
-                if (file) {
-                    const result = await cloudinaryService.uploadImage(
-                        file,
-                        allTags,
-                        {
-                            userId: req.user._id,
-                        },
-                    );
+        let baseContent;
+        let bullMQEntry;
 
-                    imgRes = payload.image = result;
-                    
-                    const aiImageRes = await groqService.getImageAnalysis(imgRes.imageUrl, imageShortNote)
+        await session.withTransaction(async () => {
+            const payload = {
+                title,
+                documentType,
+                tags: parsedTags,
+                user: req.user._id,
+            };
 
-                    payload.image = imgRes;
-                    payload.imageShortNote = imageShortNote || "";
-                    payload.imageDescription = aiImageRes.briefDescription || "";
-                    payload.imageExtractText = aiImageRes.extractedText || "";
-                } else if (content) payload.content = content;
+            if (documentType === "image") {
+                payload.image = uploadedImage;
+                payload.imageShortNote = imageShortNote || "";
+            } else payload.content = content;
 
-                const [baseContent] = await contentService.createContent(
-                    [payload],
-                    session,
-                );
+            [baseContent] = await contentService.createContent(
+                [payload],
+                session,
+            );
 
-                const chunkPoints = await chunkContent({
+            console.log("BC: ", baseContent);
+
+            const jobId = `content-${baseContent._id}`;
+
+            bullMQEntry = await bullMQEntryService.createEntry(
+                [{
+                    jobId,
                     contentId: baseContent._id,
-                    title: baseContent.title,
-                    user: baseContent.user,
-                    tags: allTags,
-                    content: baseContent.documentType === "text" ? baseContent.content : (baseContent.imageShortNote + " " + baseContent.imageDescription + " " + baseContent.imageExtractText)
-                });
+                    status: "pending",
+                }],
+                session,
+            );
+        });
 
-                console.log(chunkPoints)
+        try {
+            await contentQueue.add(
+                "process-content",
+                {
+                    contentId: baseContent._id.toString(),
+                    allTags: allTags || [],
+                    userId: req.user._id
+                    // bullMQEntryId: bullMQEntry._id.toString(),
+                },
+                {
+                    jobId: bullMQEntry.jobId,
+                    // attempts: 3,
+                    backoff: {
+                        type: "exponential",
+                        delay: 1000,
+                    },
+                    removeOnComplete: true,
+                    removeOnFail: true,
+                },
+            );
+        } catch (error) {
+            console.log(error)
+            await bullMQEntryService.updateStatus(bullMQEntry.jobId, "failed");
 
-                const qdrantRes =
-                    await qdrantService.upsertContentVectorPoints(chunkPoints);
-
-                return { baseContent, qdrantRes };
-            },
-        );
+            return res.status(503).json({
+                message:
+                    "Content saved, but the processing job could not be queued",
+                contentId: baseContent._id,
+            });
+        }
 
         return res.status(201).json({
-            message: "Content created successfully",
+            message: "Content created and queued for processing",
             content: baseContent,
-            qdrantRes,
+            job: bullMQEntry,
         });
     } catch (error) {
         console.error(error);
@@ -234,7 +273,9 @@ export const queryContent = async (req, res) => {
         const aiResult = await groqService.generateResponse(query, result);
 
         return res.status(200).json({
-            aiResult: aiResult?.choices[0]?.message?.content || "I don't have the required context to answer this question",
+            aiResult:
+                aiResult?.choices[0]?.message?.content ||
+                "I don't have the required context to answer this question",
             result,
         });
     } catch (error) {
@@ -247,16 +288,23 @@ export const queryContent = async (req, res) => {
 
 export const sampleSeed = async (req, res) => {
     try {
-        // console.log(req.file);
+        // console.log(await cloudinaryService.deleteImage("samples/zoom"));
+
+        const ab = await contentService.updateContent("6ad4ed50c5905c12aee45227", "6ac3de041ede7d6c17c0f446", {
+            imageShortNote: 'Image info',
+            imageDescription: 'Image info',
+            imageExtractText: 'Image info',
+        })
 
         res.json({
+            ab,
             message: "Image received",
-            file: {
-                originalname: req.file.originalname,
-                mimetype: req.file.detectedMimeType,
-                ext: req.file.detectedExtension,
-                size: req.file.size,
-            },
+            // file: {
+            //     originalname: req.file.originalname,
+            //     mimetype: req.file.detectedMimeType,
+            //     ext: req.file.detectedExtension,
+            //     size: req.file.size,
+            // },
         });
     } catch (error) {
         console.log(error);

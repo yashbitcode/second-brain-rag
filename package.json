@@ -6,6 +6,7 @@
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
     "dev": "nodemon src/index.js",
+    "dev-worker": "nodemon src/workers/content.worker.js",
     "start": "node src/index.js"
   },
   "keywords": [],
@@ -17,6 +18,7 @@
     "@langchain/textsplitters": "^1.0.2",
     "@qdrant/js-client-rest": "^1.19.0",
     "bcrypt": "^6.0.0",
+    "bullmq": "^6.3.15",
     "cloudinary": "^2.11.0",
     "cookie-parser": "^1.4.7",
     "dotenv": "^18.0.5",
@@ -27,6 +29,7 @@
     "mongoose": "^9.10.4",
     "morgan": "^1.12.1",
     "multer": "^2.4.0",
+    "redis": "^6.3.0",
     "uuid": "^14.0.2"
   },
   "devDependencies": {
