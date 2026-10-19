@@ -19,7 +19,7 @@ const startContentWorker = async () => {
             console.log("JOB-Data: ", job.data);
             const session = await mongoose.startSession();
 
-            const { contentId, allTags, userId } = job.data;
+            const { contentId, allTags, userId, operation } = job.data;
 
             await bullMQEntryService.updateStatus(job.id, "processing");
 
@@ -32,6 +32,11 @@ const startContentWorker = async () => {
             console.log("----------------");
 
             if (!baseContent) throw new Error("Content not found");
+
+            if(operation === "update") {
+                const delRes = await qdrantService.deleteContent(contentId, userId);
+                console.log(delRes)
+            }
 
             return await session.withTransaction(async () => {
                 let updatedBaseContent = baseContent;

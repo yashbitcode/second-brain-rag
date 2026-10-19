@@ -9,7 +9,6 @@ import bullMQEntryService from "../services/bullMQEntry.service.js";
 import { contentQueue } from "../queues/content.queue.js";
 
 export const createContent = async (req, res) => {
-
     const session = await mongoose.startSession();
     let uploadedImage = null;
 
@@ -82,11 +81,13 @@ export const createContent = async (req, res) => {
             const jobId = `content-${baseContent._id}`;
 
             bullMQEntry = await bullMQEntryService.createEntry(
-                [{
-                    jobId,
-                    contentId: baseContent._id,
-                    status: "pending",
-                }],
+                [
+                    {
+                        jobId,
+                        contentId: baseContent._id,
+                        status: "pending",
+                    },
+                ],
                 session,
             );
         });
@@ -97,22 +98,17 @@ export const createContent = async (req, res) => {
                 {
                     contentId: baseContent._id.toString(),
                     allTags: allTags || [],
-                    userId: req.user._id
-                    // bullMQEntryId: bullMQEntry._id.toString(),
+                    userId: req.user._id,
+                    operation: "create",
                 },
                 {
                     jobId: bullMQEntry.jobId,
-                    // attempts: 3,
-                    backoff: {
-                        type: "exponential",
-                        delay: 1000,
-                    },
                     removeOnComplete: true,
                     removeOnFail: true,
                 },
             );
         } catch (error) {
-            console.log(error)
+            console.log(error);
             await bullMQEntryService.updateStatus(bullMQEntry.jobId, "failed");
 
             return res.status(503).json({
@@ -169,6 +165,164 @@ export const getContents = async (req, res) => {
 };
 
 export const updateContent = async (req, res) => {
+    const session = await mongoose.startSession();
+
+    try {
+        const { id } = req.params;
+        const { title, documentType, content, tags, imageShortNote } = req.body;
+
+        const file = req.file;
+
+        const existingContent = await contentService.findContentById(
+            id,
+            req.user._id,
+        );
+
+        console.log("EXsiting content: ", existingContent);
+
+        if (!existingContent) {
+            return res.status(404).json({
+                message: "Content not found",
+            });
+        }
+
+        if (documentType && documentType !== existingContent.documentType) {
+            return res.status(400).json({
+                message: "Document type cannot be changed",
+            });
+        }
+
+        const type = existingContent.documentType;
+
+        if (type === "text" && !content?.trim()) {
+            return res.status(400).json({
+                message: "Content is required",
+            });
+        }
+
+        if (type === "image" && !file) {
+            return res.status(400).json({
+                message: "Image file is required",
+            });
+        }
+
+        const parsedTags = !tags
+            ? existingContent.tags.map((tag) => tag?._id?.toString())
+            : typeof tags === "string"
+              ? JSON.parse(tags)
+              : tags;
+
+        console.log(parsedTags);
+
+        const allTags =
+            parsedTags && parsedTags.length > 0
+                ? await tagService.getSpecificTags(parsedTags)
+                : [];
+
+        if (allTags.length !== new Set(parsedTags).size) {
+            return res.status(400).json({
+                message: "One or more tags do not exist",
+            });
+        }
+
+        let uploadedImage;
+
+        if (type === "image") {
+            await cloudinaryService.deleteImage(existingContent.image.publicId);
+
+            uploadedImage = await cloudinaryService.uploadImage(file, allTags, {
+                userId: req.user._id,
+            });
+        }
+
+        const { bullMQEntry, updatedContent } = await session.withTransaction(
+            async () => {
+                const payload = {
+                    title,
+                    tags: parsedTags,
+                };
+
+                if (type === "text") payload.content = content;
+                else {
+                    payload.image = uploadedImage;
+                    payload.imageShortNote = imageShortNote || "";
+                    payload.imageDescription = "";
+                    payload.imageExtractText = "";
+                }
+
+                const updatedContent = await contentService.updateContent(
+                    id,
+                    req.user._id,
+                    payload,
+                    session,
+                );
+
+                if (!updatedContent) throw new Error("Content not found");
+
+                console.log("Updated content: ", updatedContent);
+
+                const jobId = `content-update-${updatedContent._id}-${Date.now()}`;
+
+                const bullMQEntry = await bullMQEntryService.createEntry(
+                    [
+                        {
+                            jobId,
+                            contentId: updatedContent._id,
+                            status: "pending",
+                        },
+                    ],
+                    session,
+                );
+
+                return { bullMQEntry, updatedContent };
+            },
+        );
+
+        console.log({
+            bullMQEntry,
+            updatedContent,
+        });
+
+        try {
+            await contentQueue.add(
+                "process-content",
+                {
+                    contentId: updatedContent._id.toString(),
+                    allTags,
+                    userId: req.user._id.toString(),
+                    operation: "update",
+                },
+                {
+                    jobId: bullMQEntry.jobId,
+                    removeOnComplete: true,
+                    removeOnFail: true,
+                },
+            );
+        } catch (error) {
+            await bullMQEntryService.updateStatus(bullMQEntry.jobId, "failed");
+
+            return res.status(503).json({
+                message: "Content updated, but processing could not be queued",
+            });
+        }
+
+        return res.status(200).json({
+            message: "Content updated and processing queued successfully",
+            content: updatedContent,
+            job: bullMQEntry,
+        });
+    } catch (error) {
+        console.error(error);
+
+        return res.status(500).json({
+            message: "Something went wrong",
+        });
+    } finally {
+        await session.endSession();
+    }
+};
+
+export const updateContent2 = async (req, res) => {
     const session = await mongoose.startSession();
 
     try {
@@ -290,11 +444,15 @@ export const sampleSeed = async (req, res) => {
     try {
         // console.log(await cloudinaryService.deleteImage("samples/zoom"));
 
-        const ab = await contentService.updateContent("6ad4ed50c5905c12aee45227", "6ac3de041ede7d6c17c0f446", {
-            imageShortNote: 'Image info',
-            imageDescription: 'Image info',
-            imageExtractText: 'Image info',
-        })
+        const ab = await contentService.updateContent(
+            "6ad4ed50c5905c12aee45227",
+            "6ac3de041ede7d6c17c0f446",
+            {
+                imageShortNote: "Image info",
+                imageDescription: "Image info",
+                imageExtractText: "Image info",
+            },
+        );
 
         res.json({
             ab,

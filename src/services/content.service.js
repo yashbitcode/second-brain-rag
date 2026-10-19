@@ -10,7 +10,7 @@ class ContentService {
         return await Content.findOne({
             _id: id,
             user: userId,
-        });
+        }).populate("tags");
     }
 
     async getContents(userId, page, limit) {

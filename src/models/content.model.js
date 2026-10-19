@@ -30,6 +30,7 @@ const contentSchema = new mongoose.Schema(
 
         image: {
             type: {
+                _id: false,
                 imageUrl: {
                     type: String,
                     trim: true,

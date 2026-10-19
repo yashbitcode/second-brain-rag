@@ -17,7 +17,7 @@ const router = express.Router();
 
 router.use(authMiddleware);
 
-router.post("/", upload.single("image"), validateImage,createContent);
+router.post("/", upload.single("image"), validateImage, createContent);
 
 router.post("/sample",  sampleSeed);
 
@@ -25,7 +25,7 @@ router.post("/query", queryContent);
 
 router.get("/", getContents);
 
-router.patch("/:id", updateContent);
+router.patch("/:id", upload.single("image"), validateImage, updateContent);
 
 router.delete("/:id", deleteContent);
 
