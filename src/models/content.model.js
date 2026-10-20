@@ -10,9 +10,17 @@ const contentSchema = new mongoose.Schema(
 
         documentType: {
             type: String,
-            enum: ["text", "image"],
+            enum: ["text", "image", "yt-link"],
             required: true,
             default: "text",
+        },
+
+        link: {
+            type: String,
+            trim: true,
+            required: function () {
+                return this.documentType === "yt-link";
+            },
         },
 
         content: {
@@ -22,7 +30,7 @@ const contentSchema = new mongoose.Schema(
             },
             validate: {
                 validator: function (value) {
-                    return this.documentType === "text" || value == null;
+                    return this.documentType === "text" || this.documentType === "yt-link" || value == null;
                 },
                 message: "content is only allowed for text documents",
             },
@@ -67,8 +75,8 @@ const contentSchema = new mongoose.Schema(
             // },
             validate: {
                 validator: function (value) {
-                    console.log("this:", this.documentType)
-                    console.log("VAL:", value)
+                    console.log("this:", this.documentType);
+                    console.log("VAL:", value);
                     return this.documentType === "image" || value == null;
                 },
                 message: "imageDescription is only allowed for image documents",

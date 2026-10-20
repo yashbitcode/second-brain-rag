@@ -22,6 +22,13 @@ const bullMQEntrySchema = new mongoose.Schema(
             default: "pending",
             required: true,
         },
+
+        operation: {
+            type: String,
+            enum: ["create", "update"],
+            default: "create",  
+            required: true,
+        }
     },
     {
         timestamps: true,

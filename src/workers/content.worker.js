@@ -35,7 +35,7 @@ const startContentWorker = async () => {
 
             if(operation === "update") {
                 const delRes = await qdrantService.deleteContent(contentId, userId);
-                console.log(delRes)
+                console.log("delRes: ", delRes)
             }
 
             return await session.withTransaction(async () => {
@@ -80,7 +80,7 @@ const startContentWorker = async () => {
                     user: updatedBaseContent.user,
                     tags: allTags,
                     content:
-                        updatedBaseContent.documentType === "text"
+                        updatedBaseContent.documentType !== "image" 
                             ? updatedBaseContent.content
                             : updatedBaseContent.imageShortNote +
                               " " +

@@ -3,10 +3,11 @@ import qdrantService from "../services/qdrant.service.js";
 import tagService from "../services/tag.service.js";
 import groqService from "../services/groq.service.js";
 import mongoose from "mongoose";
-import { chunkContent } from "../utils/helpers.js";
+import { chunkContent, isValidYouTubeUrl } from "../utils/helpers.js";
 import cloudinaryService from "../services/cloudinary.service.js";
 import bullMQEntryService from "../services/bullMQEntry.service.js";
 import { contentQueue } from "../queues/content.queue.js";
+import { fetchTranscript } from "youtube-transcript";
 
 export const createContent = async (req, res) => {
     const session = await mongoose.startSession();
@@ -19,6 +20,7 @@ export const createContent = async (req, res) => {
             content,
             tags = [],
             imageShortNote,
+            link,
         } = req.body;
 
         const file = req.file;
@@ -30,6 +32,12 @@ export const createContent = async (req, res) => {
         if (documentType === "image" && !file) {
             return res.status(400).json({
                 message: "Image file is required",
+            });
+        }
+
+        if (documentType === "yt-link" && !isValidYouTubeUrl(link)) {
+            return res.status(400).json({
+                message: "Valid YT link is required",
             });
         }
 
@@ -48,6 +56,11 @@ export const createContent = async (req, res) => {
                 });
             }
         }
+
+        const YTTranscripts = await fetchTranscript(link, { lang: "en" });
+        const YTTranscriptsFomatted = YTTranscripts.map((el) => el.text).join(
+            " ",
+        );
 
         if (documentType === "image") {
             uploadedImage = await cloudinaryService.uploadImage(file, allTags, {
@@ -69,7 +82,13 @@ export const createContent = async (req, res) => {
             if (documentType === "image") {
                 payload.image = uploadedImage;
                 payload.imageShortNote = imageShortNote || "";
-            } else payload.content = content;
+            } else {
+                payload.link = documentType === "yt-link" ? link : undefined;
+                payload.content =
+                    documentType === "yt-link"
+                        ? YTTranscriptsFomatted
+                        : content;
+            }
 
             [baseContent] = await contentService.createContent(
                 [payload],
@@ -99,7 +118,7 @@ export const createContent = async (req, res) => {
                     contentId: baseContent._id.toString(),
                     allTags: allTags || [],
                     userId: req.user._id,
-                    operation: "create",
+                    operation: bullMQEntry.operation,
                 },
                 {
                     jobId: bullMQEntry.jobId,
@@ -169,7 +188,7 @@ export const updateContent = async (req, res) => {
 
     try {
         const { id } = req.params;
-        const { title, documentType, content, tags, imageShortNote } = req.body;
+        const { title, documentType, content, tags, imageShortNote, link } = req.body;
 
         const file = req.file;
 
@@ -206,6 +225,12 @@ export const updateContent = async (req, res) => {
             });
         }
 
+        if (documentType === "yt-link" && !isValidYouTubeUrl(link)) {
+            return res.status(400).json({
+                message: "Valid YT link is required",
+            });
+        }
+
         const parsedTags = !tags
             ? existingContent.tags.map((tag) => tag?._id?.toString())
             : typeof tags === "string"
@@ -235,6 +260,11 @@ export const updateContent = async (req, res) => {
             });
         }
 
+        const YTTranscripts = await fetchTranscript(link, { lang: "en" });
+        const YTTranscriptsFomatted = YTTranscripts.map((el) => el.text).join(
+            " ",
+        );
+
         const { bullMQEntry, updatedContent } = await session.withTransaction(
             async () => {
                 const payload = {
@@ -242,13 +272,21 @@ export const updateContent = async (req, res) => {
                     tags: parsedTags,
                 };
 
-                if (type === "text") payload.content = content;
-                else {
+                if (type === "image") {
                     payload.image = uploadedImage;
                     payload.imageShortNote = imageShortNote || "";
                     payload.imageDescription = "";
                     payload.imageExtractText = "";
+                } else {
+                    payload.link =
+                        documentType === "yt-link" ? link : undefined;
+                    payload.content =
+                        documentType === "yt-link"
+                            ? YTTranscriptsFomatted
+                            : content;
                 }
+
+                console.log("PAYLOAD:  ", payload)
 
                 const updatedContent = await contentService.updateContent(
                     id,
@@ -269,6 +307,7 @@ export const updateContent = async (req, res) => {
                             jobId,
                             contentId: updatedContent._id,
                             status: "pending",
+                            operation: "update",
                         },
                     ],
                     session,
@@ -278,10 +317,10 @@ export const updateContent = async (req, res) => {
             },
         );
 
-        console.log({
-            bullMQEntry,
-            updatedContent,
-        });
+        // console.log({
+        //     bullMQEntry,
+        //     updatedContent,
+        // });
 
         try {
             await contentQueue.add(
@@ -290,7 +329,7 @@ export const updateContent = async (req, res) => {
                     contentId: updatedContent._id.toString(),
                     allTags,
                     userId: req.user._id.toString(),
-                    operation: "update",
+                    operation: bullMQEntry.operation,
                 },
                 {
                     jobId: bullMQEntry.jobId,
@@ -310,64 +349,6 @@ export const updateContent = async (req, res) => {
             message: "Content updated and processing queued successfully",
             content: updatedContent,
             job: bullMQEntry,
-        });
-    } catch (error) {
-        console.error(error);
-
-        return res.status(500).json({
-            message: "Something went wrong",
-        });
-    } finally {
-        await session.endSession();
-    }
-};
-
-export const updateContent2 = async (req, res) => {
-    const session = await mongoose.startSession();
-
-    try {
-        const { id } = req.params;
-        const { title, documentType, content, tags } = req.body;
-
-        const { updatedContent, qdrantRes } = await session.withTransaction(
-            async () => {
-                const updatedContent = await contentService.updateContent(
-                    id,
-                    req.user._id,
-                    {
-                        title,
-                        documentType,
-                        content,
-                        tags,
-                    },
-                    session,
-                );
-
-                if (!updatedContent) return null;
-
-                console.log(updatedContent);
-
-                const chunkPoints = await chunkContent(updatedContent);
-
-                await qdrantService.deleteContent(id, req.user._id);
-
-                const qdrantRes =
-                    await qdrantService.upsertContentVectorPoints(chunkPoints);
-
-                return { updatedContent, qdrantRes };
-            },
-        );
-
-        if (!updatedContent) {
-            return res.status(404).json({
-                message: "Content not found",
-            });
-        }
-
-        return res.status(200).json({
-            message: "Content updated successfully",
-            content: updatedContent,
-            qdrantRes,
         });
     } catch (error) {
         console.error(error);
